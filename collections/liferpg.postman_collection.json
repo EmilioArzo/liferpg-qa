@@ -1,0 +1,271 @@
+{
+  "info": {
+    "name": "Life-RPG · Pruebas críticas",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Estado · GET /estado",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/estado"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));",
+              "pm.test('base de datos ok', () => pm.expect(pm.response.json().database).to.eql('ok'));",
+              "pm.test('responde en menos de 1s', () => pm.expect(pm.response.responseTime).to.be.below(1000));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Estado · alias GET /health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "pm.test('database ok', () => pm.expect(pm.response.json().database).to.eql('ok'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contrato · ruta inexistente devuelve 404",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/no-existe"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 404', () => pm.response.to.have.status(404));",
+              "pm.test('code NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('NOT_FOUND'));",
+              "pm.test('trae mensaje error', () => pm.expect(pm.response.json().error).to.be.a('string'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contrato · JSON inválido devuelve 400",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{ esto no es json"
+        },
+        "url": "{{baseUrl}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 400', () => pm.response.to.have.status(400));",
+              "pm.test('code BAD_REQUEST', () => pm.expect(pm.response.json().code).to.eql('BAD_REQUEST'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth · Bearer inválido devuelve 401",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer token-invalido"
+          }
+        ],
+        "url": "{{baseUrl}}/animo/hoy"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+              "pm.test(\"code UNAUTHORIZED\", () => pm.expect(pm.response.json().code).to.eql(\"UNAUTHORIZED\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "M00 · GET /usuarios/me/cuenta",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-user-id",
+            "value": "{{testUserId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/usuarios/me/cuenta"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"es el usuario de prueba\", () => pm.expect(pm.response.json().email).to.eql(pm.variables.get(\"testUserEmail\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "M02 · GET /habitos/hoy",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-user-id",
+            "value": "{{testUserId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/habitos/hoy"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"es lista\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "M03 · GET /misiones activas",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-user-id",
+            "value": "{{testUserId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/misiones?estado=activa"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"es lista\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "M04 · GET /tienda/articulos",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-user-id",
+            "value": "{{testUserId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/tienda/articulos"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"es lista\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "M04 · GET /inventario",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-user-id",
+            "value": "{{testUserId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/inventario"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"trae rewards, consumables y clothing\", () => pm.expect(pm.response.json()).to.have.all.keys(\"rewards\",\"consumables\",\"clothing\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "M06 · GET /animo/hoy",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-user-id",
+            "value": "{{testUserId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/animo/hoy"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
