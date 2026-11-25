@@ -91,18 +91,6 @@ Base `liferpg_qa`:
 
 Al terminar cada corrida, la consola indica el id guardado y si fue exitosa o con fallas.
 
-## Cómo interpretar los resultados
-
-Distingue la causa antes de contar un fallo como bug:
-
-| Síntoma | Causa probable |
-|---|---|
-| `/estado` da **503** y `database: error` | El backend no alcanza MongoDB (infraestructura) |
-| Varios endpoints dan **500** a la vez | Misma causa de conexión: es una cascada, no varios bugs |
-| `ECONNREFUSED 127.0.0.1:3000` | El backend no está corriendo |
-| **401** en pruebas con `x-user-id` | El backend corre con `NODE_ENV=production` |
-| **404** en `/usuarios/me/cuenta` | El usuario de prueba no existe o no tiene cuenta |
-| `/estado` tarda más de 1 s | Conexión en frío de Prisma con Atlas en la primera petición |
 
 ## Ejecución programada y limitaciones
 
@@ -115,34 +103,103 @@ Distingue la causa antes de contar un fallo como bug:
 
 Para una ejecución permanente, lo recomendable es un servidor siempre encendido (VM, Raspberry Pi) con el backend accesible.
 
-## Solución de problemas
+## Uso
 
-**`Cannot find module './scripts/dns-config.js'`**
-Hay una variable de entorno `NODE_OPTIONS` apuntando a un archivo que no existe en este proyecto. Revísala con `echo %NODE_OPTIONS%` y elimínala:
+| Comando | Qué hace |
+|---|---|
+| `npm test` | Una corrida contra el entorno `local` |
+| `npm run watch` | Corre ahora y luego según `QA_CRON` |
+| `npm run setup:db` | Crea índices y la expiración automática |
 
-```
-set NODE_OPTIONS=
-setx NODE_OPTIONS ""
-```
+Códigos de salida de `npm test`:
 
-**`querySrv ECONNREFUSED _mongodb._tcp...`**
-El DNS local no resuelve los registros SRV de `mongodb+srv://`. Opciones:
+- `0`: todas las pruebas pasaron y se guardaron.
+- `1`: alguna prueba falló.
+- `2`: las pruebas se ejecutaron, pero no se pudo guardar en MongoDB (el resultado queda en `reports/last-run.json`).
 
-1. Cambiar el DNS de Windows a `8.8.8.8` y `1.1.1.1`, y ejecutar `ipconfig /flushdns`.
-2. Usar en Atlas una URI sin SRV (*Connect → Drivers → "2.2.12 or earlier"*).
-3. Para los scripts de este proyecto, agregar al inicio: `require('node:dns').setServers(['8.8.8.8', '1.1.1.1'])`. Esto **no** afecta al backend, que usa Prisma.
+## Rutas probadas
 
-**Timeout o `No available servers`**
-Agrega tu IP en *Network Access* de Atlas.
+Todas usan `{{baseUrl}}` (por defecto `http://localhost:3000/api/v1`).
+Las peticiones marcadas con `x-user-id` usan el usuario de prueba `{{testUserId}}`; solo funcionan si la API **no** está en `NODE_ENV=production`.
+Todas son de lectura, salvo el JSON inválido, que la API rechaza sin guardar nada. Ninguna prueba modifica datos.
 
-**`bad auth`**
-Revisa usuario y contraseña de la URI (y codifica caracteres especiales).
+| # | Petición | Método y ruta | Módulo | Qué verifica |
+|---|---|---|---|---|
+| 1 | Estado · GET /estado | `GET /estado` | Base del servidor | 200, `status: ok`, `database: ok`, respuesta en menos de 1 s |
+| 2 | Estado · alias GET /health | `GET /health` | Base del servidor | 200 y `database: ok` |
+| 3 | Contrato · ruta inexistente | `GET /no-existe` | Base del servidor | 404, `code: NOT_FOUND` y mensaje `error` |
+| 4 | Contrato · JSON inválido | `POST /health` | Base del servidor | 400 y `code: BAD_REQUEST` |
+| 5 | Auth · Bearer inválido | `GET /animo/hoy` con `Authorization: Bearer token-invalido` | M00 · Usuarios y autenticación | 401 y `code: UNAUTHORIZED` |
+| 6 | M00 · cuenta | `GET /usuarios/me/cuenta` (`x-user-id`) | M00 · Usuarios y autenticación | 200 y el `email` es el del usuario de prueba |
+| 7 | M02 · hábitos de hoy | `GET /habitos/hoy` (`x-user-id`) | M02 · Hábitos | 200 y respuesta tipo lista |
+| 8 | M03 · misiones activas | `GET /misiones?estado=activa` (`x-user-id`) | M03 · Misiones y enfoque | 200 y respuesta tipo lista |
+| 9 | M04 · escaparate | `GET /tienda/articulos` (`x-user-id`) | M04 · Tienda | 200 y respuesta tipo lista |
+| 10 | M04 · inventario | `GET /inventario` (`x-user-id`) | M04 · Tienda e inventario | 200 y claves `rewards`, `consumables`, `clothing` |
+| 11 | M06 · ánimo de hoy | `GET /animo/hoy` (`x-user-id`) | M06 · Estado de ánimo | 200 |
 
-## Agregar nuevas pruebas
+### Cobertura por módulo
 
-1. Agrega un request a `collections/liferpg.postman_collection.json` (puedes editarlo en Postman y volver a exportarlo).
-2. Escribe sus aserciones en la pestaña *Tests* con `pm.test(...)`.
-3. Si usa un usuario autenticado, incluye el encabezado `x-user-id: {{testUserId}}`.
-4. Ejecuta `npm test` y verifica que pase.
+| Módulo | Estado de las pruebas |
+|---|---|
+| Base del servidor | Cubierto (4 pruebas) |
+| M00 Usuarios y autenticación | Cubierto parcialmente (cuenta y rechazo de token) |
+| M01 Tamagotchi y perfil | Pendiente |
+| M02 Hábitos | Solo lectura. Falta check-in y su repetición |
+| M03 Misiones y enfoque | Solo lectura. Falta crear y completar misión |
+| M04 Tienda e inventario | Solo lectura. Falta comprar con y sin saldo |
+| M05 Logros | Pendiente (reclamo doble de recompensa) |
+| M06 Estado de ánimo | Solo lectura. Falta registrar |
+| M07 Visualizador de usuarios | Sin rutas en la API |
+| M08 Botín | Pendiente (enviar regalo) |
+| M09 Diario de aventura | Pendiente |
+| M10 Notificaciones | Sin montar en el router principal |
+| M11 Resumen de progreso | Pendiente |
+| M12 Retos de grupo | Pendiente |
+| M13 Sincronización y red | Sin rutas en la API |
+| M14 Economía global | Pendiente (requiere usuario ADMIN) |
+| M15 Gestión de base de datos | Sin rutas en la API |
 
-Ideas de cobertura pendiente: flujos de escritura (crear misión con `POST /misiones` y consultarla) y los módulos M05, M08, M09 y M12.
+Las pruebas más importantes que faltan son las que modifican datos y comprueban que no se dupliquen: doble check-in, compra sin saldo, doble reclamo de logro. Conviene hacerlas con un usuario QA distinto al de desarrollo.
+
+## Datos que se guardan en MongoDB
+
+Base `liferpg_qa`. No se guardan headers, cuerpos de petición ni de respuesta, ni tokens.
+
+**`test_runs`** (un documento por corrida):
+
+| Campo | Descripción |
+|---|---|
+| `startedAt`, `finishedAt`, `durationMs` | Cuándo corrió y cuánto tardó |
+| `environment`, `baseUrl` | Entorno y URL probada |
+| `apiVersion` | Versión de la API, tomada de `/estado` |
+| `passed` | `true` si todas las pruebas pasaron |
+| `requests` | `{ total, failed }` |
+| `assertions` | `{ total, failed }` |
+| `avgResponseMs`, `maxResponseMs` | Tiempos de respuesta |
+
+**`test_results`** (un documento por petición, enlazado con `runId`):
+
+| Campo | Descripción |
+|---|---|
+| `runId`, `environment`, `createdAt` | Corrida a la que pertenece |
+| `request`, `method`, `path` | Qué se probó |
+| `statusCode`, `responseTimeMs` | Respuesta obtenida |
+| `passed`, `assertionsTotal` | Resultado de la petición |
+| `failures` | Solo las aserciones que fallaron, con su mensaje (o el error de conexión) |
+
+El resumen de cada corrida se conserva siempre. El detalle de `test_results` se borra solo después de `QA_RESULTS_TTL_DAYS` días.
+
+## Cómo agregar una prueba
+
+1. Agrega la petición a `collections/liferpg.postman_collection.json` (o impórtala en Postman, edítala y vuelve a exportarla).
+2. Escribe sus aserciones en el evento `test` con `pm.test(...)`.
+3. Si usa el usuario de prueba, agrega el header `x-user-id: {{testUserId}}`.
+4. Ejecuta `npm test` y revisa que aparezca en `reports/last-run.json`.
+5. Actualiza la tabla de rutas de este README.
+
+## Notas
+
+- El usuario de prueba es `dev.yess@liferpg.test`. Su ID y su email están en el environment; nunca guardes contraseñas o tokens en el repositorio.
+- Con la API en `NODE_ENV=production` se desactiva `x-user-id`. Para probar un servidor desplegado hará falta un token de Firebase real.
+- Para otro entorno, copia `environments/local.postman_environment.json` con otro nombre (por ejemplo `staging`) y ejecuta `node scripts/run.js staging`.
+- Los resultados se pueden visualizar conectando `liferpg_qa` a MongoDB Atlas Charts.
