@@ -13,15 +13,55 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const ROOT = path.resolve(__dirname, '..');
 const envName = process.argv[2] || 'local';
 
-function runNewman() {
+// URL que se probará: QA_BASE_URL o la del environment elegido.
+function resolveBaseUrl() {
+  if (process.env.QA_BASE_URL) return process.env.QA_BASE_URL;
+  const file = path.join(ROOT, `environments/${envName}.postman_environment.json`);
+  return JSON.parse(fs.readFileSync(file, 'utf8')).values.find((v) => v.key === 'baseUrl').value;
+}
+
+// Render duerme el servicio gratuito: se despierta antes de medir tiempos.
+async function warmUp(baseUrl) {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${baseUrl}/estado`, { signal: AbortSignal.timeout(20_000) });
+      if (res.ok) return console.log('API despierta.');
+      console.log(`API respondió ${res.status}, reintentando…`);
+    } catch {
+      console.log('Esperando a que la API despierte…');
+    }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  console.warn('La API no respondió bien en 2 min; se ejecutan las pruebas de todos modos.');
+}
+
+// Token de Firebase del usuario de prueba (null si no hay credenciales).
+async function getFirebaseToken() {
+  const { QA_FIREBASE_API_KEY: key, QA_FIREBASE_EMAIL: email, QA_FIREBASE_PASSWORD: password } = process.env;
+  if (!key || !email || !password) return null;
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, returnSecureToken: true }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(`Firebase rechazó el inicio de sesión: ${body.error?.message ?? res.status}`);
+  return body.idToken;
+}
+
+function runNewman(authToken) {
+  const envVar = [];
+  if (process.env.QA_BASE_URL) envVar.push({ key: 'baseUrl', value: process.env.QA_BASE_URL });
+  if (authToken) envVar.push({ key: 'authToken', value: authToken });
   return new Promise((resolve, reject) => {
     newman.run(
       {
         collection: path.join(ROOT, 'collections/liferpg.postman_collection.json'),
         environment: path.join(ROOT, `environments/${envName}.postman_environment.json`),
-        envVar: process.env.QA_BASE_URL ? [{ key: 'baseUrl', value: process.env.QA_BASE_URL }] : [],
+        envVar,
         reporters: ['cli'],
-        timeoutRequest: 10000,
+        timeoutRequest: 30000,
       },
       (err, summary) => (err ? reject(err) : resolve(summary)),
     );
@@ -37,7 +77,7 @@ function readApiVersion(executions) {
   }
 }
 
-function buildLog(summary, startedAt) {
+function buildLog(summary, startedAt, baseUrl) {
   const { stats, timings, executions } = summary.run;
 
   const results = executions.map((e) => {
@@ -65,7 +105,7 @@ function buildLog(summary, startedAt) {
     finishedAt: new Date(),
     durationMs: timings.completed - timings.started,
     environment: envName,
-    baseUrl: process.env.QA_BASE_URL || null,
+    baseUrl,
     apiVersion: readApiVersion(executions),
     passed: results.every((r) => r.passed),
     requests: { total: stats.requests.total, failed: results.filter((r) => !r.passed).length },
@@ -101,8 +141,14 @@ async function saveToMongo({ run, results }) {
 
 async function main() {
   const startedAt = new Date();
-  const summary = await runNewman();
-  const log = buildLog(summary, startedAt);
+  const baseUrl = resolveBaseUrl();
+
+  await warmUp(baseUrl);
+  const authToken = await getFirebaseToken();
+  if (!authToken) console.log('Sin credenciales de Firebase: se usará x-user-id (solo funciona si la API no está en producción).');
+
+  const summary = await runNewman(authToken);
+  const log = buildLog(summary, startedAt, baseUrl);
   writeLocalLog(log);
 
   try {
